@@ -208,6 +208,36 @@ module Technoweenie # :nodoc:
     end
 
     module InstanceMethods
+      def set_from_url(source_url)
+        source_uri = URI.parse(source_url)
+        self.temp_data = source_uri.read
+        
+        temp_file = File.open(temp_path, 'r')
+        self.content_type = File.mime_type?(temp_file)
+        self.filename = clean_filename_from_uri(source_uri)
+      end
+      
+      def clean_filename_from_uri(uri)
+        result = basename_from_uri(uri).inspect
+        if !result.include?('.')
+          extension = extension_for_mimetype(content_type)
+          result += ".#{extension}" if extension
+        end
+        result
+      end
+      
+      def basename_from_uri(uri)
+        if !uri.path.blank? && !File.basename(uri.path).blank?
+          File.basename(uri.path)
+        else
+          'file'
+        end
+      end
+      
+      def extension_for_mimetype(mime_type)
+        File.extensions.reject {|key, value| value != mime_type || key == :jpe }.keys.first
+      end
+      
       def self.included(base)
         base.define_callbacks *[:after_resize, :after_attachment_saved, :before_thumbnail_saved] if base.respond_to?(:define_callbacks)
       end
@@ -305,14 +335,14 @@ module Technoweenie # :nodoc:
       # An array of all the tempfile objects is stored so that the Tempfile instance is held on to until
       # it's not needed anymore.  The collection is cleared after saving the attachment.
       def temp_path
+        return nil if temp_paths.empty?
         p = temp_paths.first
         p.respond_to?(:path) ? p.path : p.to_s
       end
 
       # Gets an array of the currently used temp paths.  Defaults to a copy of #full_filename.
       def temp_paths
-        @temp_paths ||= (new_record? || !respond_to?(:full_filename) || !File.exist?(full_filename) ?
-          [] : [copy_to_temp_file(full_filename)])
+        @temp_paths ||= (new_record? || filename.blank? || !File.exist?(full_filename)) ? [] : [copy_to_temp_file(full_filename)]
       end
 
       # Adds a new temp_path to the array.  This should take a string or a Tempfile.  This class makes no
@@ -325,7 +355,11 @@ module Technoweenie # :nodoc:
 
       # Gets the data from the latest temp file.  This will read the file into memory.
       def temp_data
-        save_attachment? ? File.read(temp_path) : nil
+        if temp_path
+          return File.file?(temp_path.to_s)
+        else
+          return false
+        end
       end
 
       # Writes the given data to a Tempfile and adds it to the collection of temp files.
